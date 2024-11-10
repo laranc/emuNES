@@ -254,6 +254,9 @@ func (ppu *PPU) BusRead(addr uint16, readOnly bool) uint8 {
 	case 0x0007: // PPU Data
 		data = ppu.dataBuffer
 		ppu.dataBuffer = ppu.Read(ppu.address, false)
+		if ppu.address > 0x3F00 {
+			data = ppu.dataBuffer
+		}
 	default:
 		break
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"sort"
 
 	"github.com/laranc/emuNES/bus"
 	"github.com/laranc/emuNES/cartridge"
@@ -28,12 +29,15 @@ var (
 	gameRenderer  *sdl.Renderer = nil
 	font          *ttf.Font     = nil
 	nes           *bus.Bus      = nil
-	runningMode   int           = 0
+	stepMode      bool          = false
+	step          bool          = false
 	asm           map[uint16]string
+	asmAddrs      []uint16
 )
 
 // Colors
 var (
+	black      = sdl.Color{R: 0, G: 0, B: 0, A: 0}
 	white      = sdl.Color{R: 255, G: 255, B: 255, A: 255}
 	red        = sdl.Color{R: 255, G: 0, B: 0, A: 255}
 	green      = sdl.Color{R: 0, G: 255, B: 0, A: 255}
@@ -94,6 +98,13 @@ func main() {
 	}
 	nes.InsertCartridge(cart)
 	asm = nes.Disassemble(0x0000, 0xFFFF)
+	asmAddrs = make([]uint16, 0, len(asm))
+	for k := range asm {
+		asmAddrs = append(asmAddrs, k)
+	}
+	sort.Slice(asmAddrs, func(i int, j int) bool {
+		return asmAddrs[i] < asmAddrs[j]
+	})
 	nes.Reset()
 	run()
 }
@@ -101,25 +112,48 @@ func main() {
 func run() {
 	go func() {
 		for {
-			nes.Clock()
+			if !stepMode {
+				nes.Clock()
+			} else {
+				if step {
+					nes.Clock()
+					step = false
+				}
+			}
 		}
+
 	}()
 	running := true
 	for running {
 		for e := sdl.PollEvent(); e != nil; e = sdl.PollEvent() {
-			switch e.(type) {
+			switch t := e.(type) {
 			case sdl.QuitEvent:
 				running = false
 			case sdl.KeyboardEvent:
-				break
+				switch t.Keysym.Sym {
+				case sdl.K_TAB:
+					stepMode = !stepMode
+					if stepMode {
+						fmt.Println("Step by step mode on")
+					} else {
+						fmt.Println("Step by step mode off")
+					}
+				case sdl.K_SPACE:
+					step = true
+				default:
+					break
+				}
 			}
 		}
+
 		debugRenderer.SetDrawColor(background.R, background.G, background.B, background.A)
 		debugRenderer.Clear()
 		drawRAM(2, 2, 0x0000, 16, 16)
 		drawRAM(2, 182, 0x8000, 16, 16)
 		drawCPU(448, 2)
 		drawCode(448, 72, 26)
+		drawPalettes()
+		//drawPatternTable(x, y)
 
 		gameRenderer.SetDrawColor(0, 0, 0, 255)
 		gameRenderer.Clear()
@@ -189,27 +223,28 @@ func drawCPU(x int32, y int32) {
 }
 
 func drawCode(x int32, y int32, lines int32) {
-	ins, found := asm[nes.CPUGetPC()]
+	pc := nes.CPUGetPC()
+	addr := sort.Search(len(asmAddrs), func(i int) bool {
+		return asmAddrs[i] >= pc
+	})
 	lineY := (lines>>1)*10 + y
-	if found {
-		drawText(ins, x, lineY, cyan)
-		for lineY < (lines*10)+y {
-			lineY += 10
-			ins, found = asm[nes.CPUGetPC()+uint16(lineY)]
-			if found {
-				drawText(ins, x, lineY, white)
-			}
-		}
+	drawText(asm[asmAddrs[addr]], x, lineY, cyan)
+	for i := addr + 1; i < len(asmAddrs) && lineY < (lines*10)+y; i++ {
+		lineY += 10
+		drawText(asm[asmAddrs[i]], x, lineY, white)
 	}
-	_, found = asm[nes.CPUGetPC()]
 	lineY = (lines>>1)*10 + y
-	if found {
-		for lineY > y {
-			lineY -= 10
-			ins, found = asm[nes.CPUGetPC()]
-			if found {
-				drawText(ins, x, lineY, white)
-			}
-		}
+	for i := addr - 1; i >= 0 && lineY > y; i-- {
+		lineY -= 10
+		drawText(asm[asmAddrs[i]], x, lineY, white)
 	}
+
+}
+
+func drawPalettes() {
+
+}
+
+func drawPatternTable(x int32, y int32) {
+
 }
